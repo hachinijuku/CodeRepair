@@ -173,10 +173,28 @@ def f1(tpr,fpr,num_targets):
 
 def main():
     parser = argparse.ArgumentParser(usage='Takes a sequence of prediction files and generates a python calibration function for them')
-    parser.add_argument('--truth', nargs='+', help='sequence of ground truth files')
-    parser.add_argument('--predictions', nargs='+', help='sequence of predictions files to calibrate over', default=[])
-    parser.add_argument('--validations', nargs='+', help='sequene of validation prediction files', default=[])
-    parser.add_argument('--calibration_fpr', type=float, help='false positive rate to set calibration prediction threshold', default='0.02')
+    parser.add_argument('--algorithm',
+                        default='Anonymous')
+    parser.add_argument('--truth',
+                        nargs='+', \
+                        help='sequence of ground truth files',
+                        required=True)
+    parser.add_argument('--predictions',
+                        nargs='+',
+                        help='sequence of predictions files to calibrate over', default=[],
+                        required=True)
+    parser.add_argument('--validations',
+                        nargs='+',
+                        help='sequence of validation prediction files',
+                        default=[])
+    parser.add_argument('--calibration_fpr',
+                        type=float,
+                        help='false positive rate to set calibration prediction threshold (for predictions file)',
+                        default='0.02')
+    parser.add_argument('-w',
+                        action='store_true',
+                        help='write predictions files')
+                        
     
     args = parser.parse_args()
     assert len(args.predictions) == len(args.validations), \
@@ -186,26 +204,26 @@ def main():
 
     ## Create all figures
     legend_text = []
-    combined_roc_fig, combined_roc_axes = start_plot('Combined ROCs',
+    combined_roc_fig, combined_roc_axes = start_plot(f'{args.algorithm}\nCombined ROCs',
                                                      'FPR',
                                                      'TPR')
-    test_roc_fig, test_roc_axes = start_plot('Receiver Operating Characteristic Curves (Test)',
+    test_roc_fig, test_roc_axes = start_plot(f'{args.algorithm}\nReceiver Operating Characteristic Curves (Test)',
                                              'FPR',
                                              'TPR')
     test_precision_vs_fpr_fig, test_precision_vs_fpr_axes = \
-        start_plot('Precision vs FPR Curves',
+        start_plot(f'{args.algorithm}\nPrecision vs FPR Curves',
                    'FPR',
                    'Precision')
     validation_roc_fig, validation_roc_axes = \
-        start_plot('Receiver Operating Characteristic Curves (Validation)',
+        start_plot(f'{args.algorithm}\nReceiver Operating Characteristic Curves (Validation)',
                    'FPR',
                    'TPR')
     multi_f1_threshold_fig, multi_f1_threshold_axes = \
-        start_plot('Combined F1 Scores vs. Threshold',
+        start_plot(f'{args.algorithm}\nCombined F1 Scores vs. Threshold',
                    'Threshold',
                    'F1 Score')
     threshold_precision_fig, threshold_precision_axes = \
-        start_plot('Monotone Nondecreasing Hull of Decision Statistic to Precision Mappings',
+        start_plot(f'{args.algorithm}\nMonotone Nondecreasing Hull of Decision Statistic to Precision Mappings',
                    'Decision Statistic',
                    'Positive Predictive Value vs Threshold')
     
@@ -229,7 +247,8 @@ def main():
         legend_text.append(args.predictions[index])
         validation_roc_axes.plot(calibrations[-1:][0].validation_fpr,
                             calibrations[-1:][0].validation_tpr)
-        write_cal_predictions('cal-'+args.predictions[index], calibrations[-1:][0],args.calibration_fpr)
+        if args.w:
+            write_cal_predictions('cal-'+args.predictions[index], calibrations[-1:][0],args.calibration_fpr)
 
         f1_scores = f1(calibrations[-1:][0].test_tpr,
                        calibrations[-1:][0].test_fpr,
@@ -274,7 +293,7 @@ def main():
     validation_roc_fig.show()
 
     #plot threshold to F1 for the combined set
-    f1_fpr_fig, f1_fpr_axes = start_plot('Combined F1 Scores vs. FPR',
+    f1_fpr_fig, f1_fpr_axes = start_plot(f'{args.algorithm}\nCombined F1 Scores vs. FPR',
                                          'FPR',
                                          'F1 Score')
     combined_f1_scores = f1(combined_tpr,

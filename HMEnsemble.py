@@ -68,11 +68,26 @@ def read_predictions(filenames, truth_dict):
 
 def main():
     parser = argparse.ArgumentParser(usage='Find the harmonic mean or the results of two algorithms on the same dat a')
-    parser.add_argument('--truth', nargs='+', help = 'truth_files' )
-    parser.add_argument('--p1', nargs='+', help='[predictions1.txt])')
-    parser.add_argument('--l1', default='Algorithm 1', required=False,  help='Label for Predictions 1')
-    parser.add_argument('--p2', nargs='+', help='[predictions2.txt]')
-    parser.add_argument('--l2', default='Algorithm 2', required=False,  help='Label for Predictions 2')
+    parser.add_argument('--truth',
+                        nargs='+',
+                        help = 'truth_files',
+                        required=True)
+    parser.add_argument('--p1',
+                        nargs='+',
+                        help='[predictions1.txt])',
+                        required=True)
+    parser.add_argument('--l1',
+                        default='Algorithm 1',
+                        required=False,
+                        help='Label for Predictions 1')
+    parser.add_argument('--p2',
+                        nargs='+',
+                        help='[predictions2.txt]',
+                        required=True)
+    parser.add_argument('--l2',
+                        default='Algorithm 2',
+                        required=False,
+                        help='Label for Predictions 2')
     args = parser.parse_args()
     
     truth_dict=grab_truth(args.truth)
