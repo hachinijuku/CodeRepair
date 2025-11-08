@@ -15,7 +15,7 @@ import random
 
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.metrics import roc_curve
+from sklearn.metrics import roc_curve, roc_auc_score
 
 class CalibratedResults:
 
@@ -89,6 +89,7 @@ class CalibratedResults:
                                list(self.test_idxs))),
                       list(self.test_precision_decisions))
         
+
     def __read_decisions(self, truth_dict, file):
         # truth_dict:
         #  Dictionary mapping predictions idx values to 1 (target) or 0 (benign)
@@ -127,6 +128,12 @@ class CalibratedResults:
 
         return idxs, decisions, num_targets
 
+def brier_score(predictions, probabilities):
+    assert len(predictions) == len(probabilities), \
+        f'brier_score: Mismatch between predictions ({len(predictions)} and probabilities ({len(probabilities)}'
+    n = len(predictions)
+    return (1/n*np.sum(np.square(np.subtract(probabilities,predictions))))
+        
 def write_cal_predictions(filename, cal_object, fpr):
     try:
         fd = open(filename,'w')
@@ -198,11 +205,12 @@ def main():
     
     args = parser.parse_args()
     assert len(args.predictions) == len(args.validations), \
-        f'Number of predicditions files ({len(args.predictions)}) must match validation files ({len(args.validations)})'
+        f'Number of predictions files ({len(args.predictions)}) must match validation files ({len(args.validations)})'
 
     truth_dict = grab_truth(args.truth)
 
     ## Create all figures
+    plt_colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
     legend_text = []
     combined_roc_fig, combined_roc_axes = start_plot(f'{args.algorithm}\nCombined ROCs',
                                                      'FPR',
@@ -218,6 +226,10 @@ def main():
         start_plot(f'{args.algorithm}\nReceiver Operating Characteristic Curves (Validation)',
                    'FPR',
                    'TPR')
+    calibration_graph_fig, calibration_graph_axes = \
+        start_plot(f'{args.algorithm} -- One Fold Calibration Graph',
+                   'Prediction',
+                   'Probatility (Precision)')
     multi_f1_threshold_fig, multi_f1_threshold_axes = \
         start_plot(f'{args.algorithm}\nCombined F1 Scores vs. Threshold',
                    'Threshold',
@@ -260,24 +272,75 @@ def main():
                                     s=1,
                                     linewidths=1)
         
-        combined_idxs += calibrations[-1:][0].test_idxs
-        calibrated_decisions += calibrations[-1:][0].test_precision_decisions
+        combined_idxs += calibrations[-1:][0].test_idxs 
+       calibrated_decisions += calibrations[-1:][0].test_precision_decisions
         combined_num_targets += calibrations[-1:][0].test_num_targets
         combined_decisions += calibrations[-1:][0].test_decisions
+        if index == 8:
+            # Calculate actual precisions on raw test values
+            test_num_nontargets = len(calibrations[-1:][0].test_thresholds) - \
+                calibrations[-1:][0].test_num_targets
+            test_precisions = []
+            for fprate,tprate,thresh in zip(calibrations[-1:][0].test_tpr[1:],
+                                            calibrations[-1:][0].test_fpr[1:],
+                                            calibrations[-1:][0].test_thresholds[1:]):
+                test_precisions.append(tprate*calibrations[-1:][0].test_num_targets/\
+                                       (tprate*calibrations[-1:][0].test_num_targets\
+                                        + fprate*test_num_nontargets))
+            rev_test_thresh = calibrations[-1:][0].test_thresholds[1:].tolist()
+            rev_test_thresh.reverse()
+
+            #calculate brier score
+            print('Brier Scores')
+            print(f' raw predictions: {brier_score(rev_test_thresh[1:], test_precisions[1:])}')
+                                                  
+                        
+            calibration_graph_axes.plot(rev_test_thresh[1:],
+                                        test_precisions[1:],
+                                        linestyle='solid',
+                                        color=plt_colors[0])
+
+            #Calculate actual precisions on calibrated test values
+            cal_test_precisions = []
+            for fprate,tprate,thresh in zip(calibrations[-1:][0].calibrated_tpr[1:],
+                                            calibrations[-1:][0].calibrated_fpr[1:],
+                                            calibrations[-1:][0].calibrated_thresholds[1:]):
+                cal_test_precisions.append(tprate*calibrations[-1:][0].test_num_targets/\
+                                           (tprate*calibrations[-1:][0].test_num_targets\
+                                            + fprate*test_num_nontargets))
+
+            rev_cal_test_thresh = calibrations[-1:][0].calibrated_thresholds[1:].tolist()
+            rev_cal_test_thresh.reverse()
+
+            print(f' cal predictions: {brier_score(rev_cal_test_thresh[1:], cal_test_precisions[1:])}')
+            calibration_graph_axes.plot(rev_cal_test_thresh[1:],
+                                        cal_test_precisions[1:],
+                                        color=plt_colors[1])
+            calibration_graph_axes.plot([0,1],
+                                        [0,1],
+                                        linestyle='dashed',
+                                        color='black')
+                                        
         
     # plot the combined calibrated ROC
     combined_thresh_fpr, combined_thresh_tpr, combined_thesh_thresholds = \
         roc_curve(list(map(lambda x:truth_dict[x],
                            combined_idxs)),
                   combined_decisions)
-    combined_fpr, combined_tpr, combined_thresholds = \
+    combined_thresh_auc = roc_auc_score(list(map(lambda x:truth_dict[x],
+                           combined_idxs)),
+                  combined_decisions)
+    combined_cal_fpr, combined_cal_tpr, combined_cal_thresholds = \
         roc_curve(list(map(lambda x:truth_dict[x],
                            combined_idxs)),
                   list(calibrated_decisions))
+    combined_cal_auc = roc_auc_score(list(map(lambda x:truth_dict[x],
+                                              combined_idxs)),
+                                     list(calibrated_decisions))
     combined_roc_axes.plot(combined_thresh_fpr, combined_thresh_tpr)
-    combined_roc_axes.plot(combined_fpr, combined_tpr)
+    combined_roc_axes.plot(combined_cal_fpr, combined_cal_tpr)
 
-    combined_roc_axes.legend(['Threshold','Calibrated'], loc='lower right')
+    combined_roc_axes.legend([f'Raw Thresholds (AUC = {combined_thresh_auc:.3f})',f'Calibrated (AUC = {combined_cal_auc:.3f}'], loc='lower right')
     combined_roc_fig.show()
 
     
@@ -296,16 +359,21 @@ def main():
     f1_fpr_fig, f1_fpr_axes = start_plot(f'{args.algorithm}\nCombined F1 Scores vs. FPR',
                                          'FPR',
                                          'F1 Score')
-    combined_f1_scores = f1(combined_tpr,
-                            combined_fpr,
-                            combined_num_targets)
+    combined_cal_f1_scores = f1(combined_cal_tpr,
+                                combined_cal_fpr,
+                                combined_num_targets)
     
-    f1_fpr_axes.plot(combined_fpr, combined_f1_scores)
+    f1_fpr_axes.plot(combined_cal_fpr, combined_cal_f1_scores)
     f1_fpr_fig.show()
 
     multi_f1_threshold_axes.legend(legend_text, loc='lower left')
     multi_f1_threshold_fig.show()
 
+    calibration_graph_axes.set_xlim(0,1)
+    calibration_graph_axes.set_ylim(0,1)
+    calibration_graph_axes.legend(['Raw predictions', 'calibrated predictions', '(Perfect Predictions)'], loc='upper left')
+    calibration_graph_fig.show()
+                                
     threshold_precision_axes.legend(legend_text, loc='upper left')
     threshold_precision_fig.show()
 

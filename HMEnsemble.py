@@ -6,7 +6,7 @@
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.metrics import roc_curve
+from sklearn.metrics import roc_curve, roc_auc_score
 import json
 
 def start_plot(xlabel, ylabel):
@@ -63,7 +63,7 @@ def read_predictions(filenames, truth_dict):
             decisions.append(float(tuple[2]))
             
         
-        return idxs, decisions
+    return idxs, decisions
         
 
 def main():
@@ -118,10 +118,15 @@ def main():
     
     fpr1, tpr1, thresh1 = roc_curve(list(map(lambda x: truth_dict[x], idx1)),
                                     p1)
+    auc1=roc_auc_score(list(map(lambda x: truth_dict[x], idx1)), p1)
+
+    
     roc_axes.plot(fpr1, tpr1)
     
     fpr2, tpr2, thresh2 = roc_curve(list(map(lambda x: truth_dict[x], idx2)),
                                     p2)
+    auc2=roc_auc_score(list(map(lambda x: truth_dict[x], idx2)), p2)
+
     roc_axes.plot(fpr2, tpr2)
     
     p2_in_p1_order = list(map(lambda x: p2dict[x], idx1))
@@ -129,6 +134,8 @@ def main():
     hm_fpr, hm_tpr, hm_thresh = \
         roc_curve(list(map(lambda x: truth_dict[x], idx1)),
                   hmeans)
+    hm_auc=roc_auc_score(list(map(lambda x: truth_dict[x], idx1)), hmeans)
+
     roc_axes.plot(hm_fpr, hm_tpr)
 
     maxp1 = max(p1)
@@ -137,14 +144,16 @@ def main():
     max_fpr, max_tpr, max_thresh = \
         roc_curve(list(map(lambda x: truth_dict[x], idx1)),
                   maxp)
+    max_auc=roc_auc_score(list(map(lambda x: truth_dict[x], idx1)), maxp)
     roc_axes.plot(max_fpr, max_tpr)
 
     meanp = list(map(lambda x1, x2: (x1 + x2)/2, p1, p2_in_p1_order))
     mean_fpr, mean_tpr, mean_thresh = \
         roc_curve(list(map(lambda x: truth_dict[x], idx1)), meanp)
+    mean_auc=roc_auc_score(list(map(lambda x: truth_dict[x], idx1)), meanp)
     roc_axes.plot(mean_fpr, mean_tpr)
 
-    roc_axes.legend([args.l1, args.l2, 'Harmonic Mean', 'Max', 'Arithmetic Mean'], loc='lower right')
+    roc_axes.legend([f'{args.l1} (AUC {auc1:.3f})', f'{args.l2} (AUC {auc2:.3f})', f'Harmonic Mean (AUC {hm_auc:.3f})', f'Max (AUC {max_auc:.3f})', f'Arithmetic Mean (AUC {mean_auc:.3f})'], loc='lower right')
     roc_fig.show()
     
     plt.show(block=True)                          
