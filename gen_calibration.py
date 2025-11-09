@@ -38,9 +38,9 @@ class CalibratedResults:
         self.validation_decisions_file = validation_decisions_file
 
         # Read both test and validation set decisions
-        self.test_idxs, self.test_decisions, self.test_num_targets = \
+        self.test_idxs, self.test_decisions, self.test_num_targets, self.test_num_nontargets = \
             self.__read_decisions(truth_dict, self.test_decisions_file)
-        self.validation_idxs, self.validation_decisions, self.validation_num_targets = \
+        self.validation_idxs, self.validation_decisions, self.validation_num_targets, self.validation_num_nontargets= \
             self.__read_decisions(truth_dict, self.validation_decisions_file)
 
             
@@ -57,7 +57,6 @@ class CalibratedResults:
                       list(self.validation_decisions))
 
         precisions = []
-        num_nontargets = len(self.validation_decisions) - self.validation_num_targets
 
         # For each threshold, find the precision that a collection of samples
         # with that threshold (or greater) has in the validation set,
@@ -71,7 +70,7 @@ class CalibratedResults:
                                         self.validation_tpr[1:],
                                         self.validation_thresholds[1:]):
             precisions.append(tprate*self.validation_num_targets/ \
-                              (tprate*self.validation_num_targets+fprate*num_nontargets))
+                              (tprate*self.validation_num_targets+fprate*self.validation_num_nontargets))
         rev_thresh = self.validation_thresholds[1:].tolist()
         rev_thresh.reverse()
         self.validation_precisions = precisions[:]
@@ -101,7 +100,7 @@ class CalibratedResults:
         #  decision is the label at threshold 0.5 (0 or 1)
         #  decision_statistic is the model output value in range [0,1]
         #
-        # returns idxs, decisions, num_targets
+        # returns idxs, decisions, num_targets, num_nontargets
         # idxs is the list of target indexes
         # decisions is the list of decision statistics corresponding to the idxs in order
         # num_targets is the number of target objects as given by the truth_dict
@@ -114,19 +113,23 @@ class CalibratedResults:
         data = fd.readlines()
         fd.close()
 
+        num_targets = 0
+        num_nontargets = 0
         idxs = []
         decisions = []
-        num_targets = 0
         for datum in data:
             tuple = datum.split('\t')
             idx = int(tuple[0])
             #assert not idx in decisions, \
             #    f'duplicate ids in {file}: {idx}'
-            num_targets += int(truth_dict[idx] == 1)
+            if truth_dict[idx]:
+                num_targets += 1
+            else:
+                num_nontargets += 1
             idxs.append(idx)
             decisions.append(float(tuple[2]))
 
-        return idxs, decisions, num_targets
+        return idxs, decisions, num_targets, num_nontargets
 
 def brier_score(predictions, probabilities):
     assert len(predictions) == len(probabilities), \
@@ -163,6 +166,8 @@ def start_plot(title, xlabel, ylabel):
     this_axes.set_xlabel(xlabel)
     this_axes.set_ylabel(ylabel)
     this_axes.grid(visible=True)
+    this_axes.set_xticks(np.arange(0, 1, 0.1))
+    this_axes.set_yticks(np.arange(0, 1, 0.1))
     return this_fig, this_axes
 
 def monotone_nondecreasing_hull(f):
@@ -273,48 +278,43 @@ def main():
                                     linewidths=1)
         
         combined_idxs += calibrations[-1:][0].test_idxs 
-       calibrated_decisions += calibrations[-1:][0].test_precision_decisions
+        calibrated_decisions += calibrations[-1:][0].test_precision_decisions
         combined_num_targets += calibrations[-1:][0].test_num_targets
         combined_decisions += calibrations[-1:][0].test_decisions
-        if index == 8:
+        if index == 7:
             # Calculate actual precisions on raw test values
-            test_num_nontargets = len(calibrations[-1:][0].test_thresholds) - \
-                calibrations[-1:][0].test_num_targets
+            #test_num_nontargets = len(calibrations[-1:][0].test_thresholds) - \
+            #    calibrations[-1:][0].test_num_targets
             test_precisions = []
-            for fprate,tprate,thresh in zip(calibrations[-1:][0].test_tpr[1:],
-                                            calibrations[-1:][0].test_fpr[1:],
+            for fprate,tprate,thresh in zip(calibrations[-1:][0].test_fpr[1:],
+                                            calibrations[-1:][0].test_tpr[1:],
                                             calibrations[-1:][0].test_thresholds[1:]):
                 test_precisions.append(tprate*calibrations[-1:][0].test_num_targets/\
                                        (tprate*calibrations[-1:][0].test_num_targets\
-                                        + fprate*test_num_nontargets))
-            rev_test_thresh = calibrations[-1:][0].test_thresholds[1:].tolist()
-            rev_test_thresh.reverse()
+                                        + fprate*calibrations[-1:][0].test_num_nontargets))
 
             #calculate brier score
             print('Brier Scores')
-            print(f' raw predictions: {brier_score(rev_test_thresh[1:], test_precisions[1:])}')
+            print(f' raw predictions: {brier_score(calibrations[-1:][0].test_thresholds[1:], test_precisions)}')
                                                   
                         
-            calibration_graph_axes.plot(rev_test_thresh[1:],
-                                        test_precisions[1:],
+            calibration_graph_axes.plot(calibrations[-1:][0].test_thresholds[1:],
+                                        test_precisions,
                                         linestyle='solid',
                                         color=plt_colors[0])
 
             #Calculate actual precisions on calibrated test values
             cal_test_precisions = []
-            for fprate,tprate,thresh in zip(calibrations[-1:][0].calibrated_tpr[1:],
-                                            calibrations[-1:][0].calibrated_fpr[1:],
+            for fprate,tprate,thresh in zip(calibrations[-1:][0].calibrated_fpr[1:],
+                                            calibrations[-1:][0].calibrated_tpr[1:],
                                             calibrations[-1:][0].calibrated_thresholds[1:]):
                 cal_test_precisions.append(tprate*calibrations[-1:][0].test_num_targets/\
                                            (tprate*calibrations[-1:][0].test_num_targets\
-                                            + fprate*test_num_nontargets))
+                                            + fprate*calibrations[-1:][0].test_num_nontargets))
 
-            rev_cal_test_thresh = calibrations[-1:][0].calibrated_thresholds[1:].tolist()
-            rev_cal_test_thresh.reverse()
-
-            print(f' cal predictions: {brier_score(rev_cal_test_thresh[1:], cal_test_precisions[1:])}')
-            calibration_graph_axes.plot(rev_cal_test_thresh[1:],
-                                        cal_test_precisions[1:],
+            print(f' cal predictions: {brier_score(calibrations[-1:][0].calibrated_thresholds[1:], cal_test_precisions)}')
+            calibration_graph_axes.plot(calibrations[-1:][0].calibrated_thresholds[1:],
+                                        cal_test_precisions,
                                         color=plt_colors[1])
             calibration_graph_axes.plot([0,1],
                                         [0,1],
@@ -339,8 +339,9 @@ def main():
                                      list(calibrated_decisions))
     combined_roc_axes.plot(combined_thresh_fpr, combined_thresh_tpr)
     combined_roc_axes.plot(combined_cal_fpr, combined_cal_tpr)
+    combined_roc_axes.plot([0,1],[0,1],color='black', linestyle='dashed')
 
-    combined_roc_axes.legend([f'Raw Thresholds (AUC = {combined_thresh_auc:.3f})',f'Calibrated (AUC = {combined_cal_auc:.3f}'], loc='lower right')
+    combined_roc_axes.legend([f'Raw Thresholds (AUC = {combined_thresh_auc:.3f})',f'Calibrated (AUC = {combined_cal_auc:.3f}','random'], loc='lower right')
     combined_roc_fig.show()
 
     
