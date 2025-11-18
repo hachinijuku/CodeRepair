@@ -86,10 +86,18 @@ def main():
                         nargs='+',
                         help='[predictions1.txt]',
                         required=True)
+    parser.add_argument('--l1',
+                        default='Algorithm 1',
+                        required=False,
+                        help='Label for Predictions 1')
     parser.add_argument('--p2',
                         nargs='+',
                         help='[predictions2.txt]',
                         required=True)
+    parser.add_argument('--l2',
+                        default='Algorithm 2',
+                        required=False,
+                        help='Label for Predictions 2')
 
     args = parser.parse_args()
     
@@ -100,23 +108,34 @@ def main():
         read_predictions(args.p2, truth_dict);
 
     roc_fig, roc_axes = start_plot('', "FPR","TPR")
-    roc_axes.set_title("ROC Curves - Identical Thresholds Shown")
-
+    
     threshold = 0.5
     
+    roc_axes.set_title(f"ROC Curves - Threshold ({threshold}) Marked")
+
+    p1 = list(map(lambda x: 1-(1-x*0.48)+0.48, p1))
+
     fpr1, tpr1, thresh1 = roc_curve(list(map(lambda x: truth_dict[x], idx1)),
                                     p1)
     thresh1_index = bsearch(thresh1, threshold, op=(lambda a,b: a >= b))
-    roc_axes.scatter(fpr1[thresh1_index], tpr1[thresh1_index], marker='x', label='_nolegend_')
+    roc_axes.scatter(fpr1[thresh1_index],
+                     tpr1[thresh1_index],
+                     marker='x',
+                     label='_nolegend_')
     roc_axes.plot(fpr1, tpr1)
 
-    p2 = list(map(lambda x: 1-(1-x*0.48)+0.48, p2))
     fpr2, tpr2, thresh2 = roc_curve(list(map(lambda x: truth_dict[x], idx2)),
                                     p2)
     thresh2_index = bsearch(thresh2, threshold, op=(lambda a,b: a >= b))
-    roc_axes.scatter(fpr2[thresh2_index], tpr2[thresh2_index], marker='x')
+    roc_axes.scatter(fpr2[thresh2_index],
+                     tpr2[thresh2_index],
+                     marker='x',
+                     label='_nolegend_')
+
     roc_axes.plot(fpr2, tpr2)
-    
+    roc_axes.plot([0,1],[0,1],color='black',linestyle='dashed')
+    roc_axes.legend([f'{args.l1}', f'{args.l2}', '(random)'], loc='lower right')
+
     plt.show(block=True)                          
     
 

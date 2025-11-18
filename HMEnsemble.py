@@ -6,7 +6,7 @@
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.metrics import roc_curve, roc_auc_score
+from sklearn.metrics import roc_curve, roc_auc_score, precision_recall_curve
 import json
 from bsearch import bsearch
 
@@ -43,7 +43,7 @@ def find_fpr_tpr(target_precision, fpr, tpr, threshes, num_targets, num_nontarge
     return fpr[graph_idx], tpr[graph_idx], threshes[graph_idx]
 
 def start_plot(xlabel, ylabel):
-    this_fig, this_axes = plt.subplots()
+    this_fig, this_axes = plt.subplots(figsize=(6,6))
     this_axes.set_xlabel(xlabel)
     this_axes.set_ylabel(ylabel)
     this_axes.grid(visible=True)
@@ -115,7 +115,35 @@ def write_predictions(filename, test_idxs, decisions):
         print(f'Unable to write cal predictions file {filename}')
         fd.close()
 
+def plot_all(name,
+             roc_axes,
+             pr_axes,
+             truth_dict,
+             idx,
+             decisions,
+             num_targets,
+             num_nontargets,
+             do_write,
+             file_prefix):
+    
+    fpr, tpr, thresh = \
+        roc_curve(list(map(lambda x: truth_dict[x], idx)),
+                  decisions)
+    roc_axes.plot(fpr, tpr)
 
+    precision, recall, pr_thresh = \
+        precision_recall_curve(list(map(lambda x: truth_dict[x], idx)),
+                                   decisions)
+    pr_axes.plot(recall, precision)
+
+    fpr_20, tpr_20, thresh20= find_fpr_tpr(0.2, fpr, tpr, thresh, num_targets, num_nontargets)
+    roc_axes.scatter(fpr_20, tpr_20, marker='x', label='_nolegend_')
+        
+    print(f'{name} = 20% Precision at TPR {tpr_20:.4f}')
+    if do_write:
+        write_predictions(f'{file_prefix}-predictions.txt', idx, decisions)
+    return roc_auc_score(list(map(lambda x: truth_dict[x], idx)), decisions)
+        
 
 def main():
     parser = argparse.ArgumentParser(usage='Find the harmonic mean or the results of two algorithms on the same dat a')
@@ -123,6 +151,10 @@ def main():
                         nargs='+',
                         help = 'truth_files',
                         required=True)
+    parser.add_argument('--truth2',
+                        nargs='+',
+                        help = 'truth_files',
+                        required=False)
     parser.add_argument('--p1',
                         nargs='+',
                         help='[predictions1.txt]',
@@ -142,16 +174,26 @@ def main():
     parser.add_argument('-w',
                         action='store_true',
                         help='write fusion files')
+    parser.add_argument('-nofuse',
+                        action='store_true',
+                        help='write fusion files')
+    
     
     args = parser.parse_args()
-    
+
+    assert args.nofuse or (args.truth2 == None),\
+        "Only one truth file allowed with fusion"
     truth_dict=grab_truth(args.truth)
+    if args.truth2 != None:
+        truth2_dict=grab_truth(args.truth2)
+    else:
+        truth2_dict = truth_dict
     idx1,p1, num_targets, num_nontargets = \
         read_predictions(args.p1, truth_dict)
     idx2,p2, num_targets2, num_nontargets2 = \
-        read_predictions(args.p2, truth_dict);
-    assert (num_targets == num_targets2) and \
-        (num_nontargets == num_nontargets2), \
+        read_predictions(args.p2, truth2_dict);
+    assert args.nofuse or ((num_targets == num_targets2) and \
+        (num_nontargets == num_nontargets2)), \
         '** Number of targets or nontargets mismatch: \n' \
         + f'   {num_targets}:{num_targets2}, {num_nontargets}:{num_nontargets2}'
     
@@ -161,83 +203,99 @@ def main():
     idxtrue = list(filter (lambda x: truth_dict[x], idx1))
     idxfalse = list(filter (lambda x: not truth_dict[x], idx1))
     
-    scatter_fig, scatter_axes = start_plot(args.l1, args.l2)
-    scatter_axes.set_title(f'{args.l2} vs \n {args.l1}')
-    
-    p1false = list(map(lambda x: p1dict[x],idxfalse))
-    p2false = list(map(lambda x: p2dict[x], idxfalse))
-    scatter_axes.scatter(p1false, p2false, marker='o', color='orange',s=2, linewidth=1)
-    p1true = list(map(lambda x: p1dict[x],idxtrue))
-    p2true = list(map(lambda x: p2dict[x], idxtrue))
-    scatter_axes.scatter(p1true, p2true, marker='*', color='blue',s=2, linewidth=1)
+    if not args.nofuse:
+        scatter_fig, scatter_axes = start_plot(args.l1, args.l2)
+        scatter_axes.set_title(f'{args.l2} vs \n {args.l1}')
+        
+        p1false = list(map(lambda x: p1dict[x],idxfalse))
+        p2false = list(map(lambda x: p2dict[x], idxfalse))
+        
+        scatter_axes.scatter(p1false, p2false, marker='o', color='orange',s=2, linewidth=1)
+        p1true = list(map(lambda x: p1dict[x],idxtrue))
+        p2true = list(map(lambda x: p2dict[x], idxtrue))
+        scatter_axes.scatter(p1true, p2true, marker='*', color='blue',s=2, linewidth=1)
 
-    scatter_axes.legend(['Benign','Vulnerable'],loc='lower right')
-    scatter_fig.show()
+        scatter_axes.legend(['Benign','Vulnerable'],loc='lower right')
+        scatter_fig.show()
     
     roc_fig, roc_axes = start_plot("FPR","TPR")
-    roc_axes.set_title("ROC Curves")
+    pr_fig, pr_axes = start_plot("Recall", "Precision")
+
+    auc1 = plot_all(f'{args.p1}',
+                    roc_axes,
+                    pr_axes,
+                    truth_dict,
+                    idx1,
+                    p1,
+                    num_targets,
+                    num_nontargets,
+                    False, '')
     
-    fpr1, tpr1, thresh1 = roc_curve(list(map(lambda x: truth_dict[x], idx1)),
-                                    p1)
-    auc1=roc_auc_score(list(map(lambda x: truth_dict[x], idx1)), p1)
+    auc2 = plot_all(f'{args.p2}',
+                    roc_axes,
+                    pr_axes,
+                    truth2_dict,
+                    idx2,
+                    p2,
+                    num_targets2,
+                    num_nontargets2,
+                    False, '')
 
+
+    if not args.nofuse:
+        p2_in_p1_order = list(map(lambda x: p2dict[x], idx1))
     
-    roc_axes.plot(fpr1, tpr1)
-    fpr_20, tpr_20, thresh20= find_fpr_tpr(0.2, fpr1, tpr1, thresh1, num_targets, num_nontargets)
-    roc_axes.scatter(fpr_20, tpr_20, marker='x', label='_nolegend_')
-    print(f'{args.p1} = 20% Precision at TPR {tpr_20}')
-    
-    fpr2, tpr2, thresh2 = roc_curve(list(map(lambda x: truth_dict[x], idx2)),
-                                    p2)
-    auc2=roc_auc_score(list(map(lambda x: truth_dict[x], idx2)), p2)
-    fpr_20, tpr_20, thresh20= find_fpr_tpr(0.2, fpr2, tpr2, thresh2, num_targets, num_nontargets)
-    roc_axes.scatter(fpr_20, tpr_20, marker='x', label='_nolegend_')
-    print(f'{args.p2} = 20% Precision at TPR {tpr_20}')
+        hmeans = list(map(lambda x, y: 2/(1/x + 1/y),
+                          p1, p2_in_p1_order))
+        hm_auc = plot_all(f'HarmonicMean',
+                          roc_axes,
+                          pr_axes,
+                          truth_dict,
+                          idx1,
+                          hmeans,
+                          num_targets,
+                          num_nontargets,
+                          args.w,
+                          'Hmean')
 
-    roc_axes.plot(fpr2, tpr2)
-    
-    p2_in_p1_order = list(map(lambda x: p2dict[x], idx1))
-    hmeans = list(map(lambda x, y: 2/(1/x + 1/y), p1, p2_in_p1_order))
-    hm_fpr, hm_tpr, hm_thresh = \
-        roc_curve(list(map(lambda x: truth_dict[x], idx1)),
-                  hmeans)
-    hm_auc=roc_auc_score(list(map(lambda x: truth_dict[x], idx1)), hmeans)
+        maxp1 = max(p1)
+        maxp2 = max(p2)
+        maxp = list(map(lambda x1, x2: max([x1/maxp1,x2/maxp2]),
+                        p1, p2_in_p1_order))
+        max_auc = plot_all(f'Max',
+                           roc_axes,
+                           pr_axes,
+                           truth_dict,
+                           idx1,
+                           maxp,
+                           num_targets,
+                           num_nontargets,
+                           args.w,
+                           'max')
 
-    roc_axes.plot(hm_fpr, hm_tpr)
-    fpr_20, tpr_20, thresh20= find_fpr_tpr(0.2, hm_fpr, hm_tpr, hm_thresh, num_targets, num_nontargets)
-    roc_axes.scatter(fpr_20, tpr_20, marker='x', label='_nolegend_')
-    print(f'Harmonic Mean = 20% Precision at TPR {tpr_20}')
-    if args.w:
-        write_predictions('hmean-predictions.txt', idx1, hmeans)
+        meanp = list(map(lambda x1, x2: (x1 + x2)/2,
+                         p1, p2_in_p1_order))
+        mean_auc = plot_all(f'Mean',
+                            roc_axes,
+                            pr_axes,
+                            truth_dict,
+                            idx1,
+                            meanp,
+                            num_targets,
+                            num_nontargets,
+                            args.w,
+                            'mean')
 
-    maxp1 = max(p1)
-    maxp2 = max(p2)
-    maxp = list(map(lambda x1, x2: max([x1/maxp1,x2/maxp2]), p1, p2_in_p1_order))
-    max_fpr, max_tpr, max_thresh = \
-        roc_curve(list(map(lambda x: truth_dict[x], idx1)),
-                  maxp)
-    max_auc=roc_auc_score(list(map(lambda x: truth_dict[x], idx1)), maxp)
-    roc_axes.plot(max_fpr, max_tpr)
-    fpr_20, tpr_20, thresh20= find_fpr_tpr(0.2, max_fpr, max_tpr, max_thresh, num_targets, num_nontargets)
-    roc_axes.scatter(fpr_20, tpr_20, marker='x', label='_nolegend_')
-    print(f'Max = 20% Precision at TPR {tpr_20}')
-    if args.w:
-        write_predictions('max-predictions.txt', idx1, maxp)
-
-    meanp = list(map(lambda x1, x2: (x1 + x2)/2, p1, p2_in_p1_order))
-    mean_fpr, mean_tpr, mean_thresh = \
-        roc_curve(list(map(lambda x: truth_dict[x], idx1)), meanp)
-    mean_auc=roc_auc_score(list(map(lambda x: truth_dict[x], idx1)), meanp)
-    roc_axes.plot(mean_fpr, mean_tpr)
-    fpr_20, tpr_20, thresh20= find_fpr_tpr(0.2, mean_fpr, mean_tpr, mean_thresh, num_targets, num_nontargets)
-    roc_axes.scatter(fpr_20, tpr_20, marker='x', label='_nolegend_')
-    print(f'Mean = 20% Precision at TPR {tpr_20}')
-    if args.w:
-        write_predictions('mean-predictions.txt', idx1, meanp)
-
+        
     roc_axes.plot([0,1],[0,1], color='black', linestyle='dashed')
-    roc_axes.legend([f'{args.l1} (AUC {auc1:.3f})', f'{args.l2} (AUC {auc2:.3f})', f'Harmonic Mean (AUC {hm_auc:.3f})', f'Max (AUC {max_auc:.3f})', f'Arithmetic Mean (AUC {mean_auc:.3f})', 'random'], loc='lower right')
+    roc_legend = [f'{args.l1} (AUC {auc1:.3f})', f'{args.l2} (AUC {auc2:.3f})']
+    pr_legend = [f'{args.l1}', f'{args.l2}']
+    if not args.nofuse:
+        roc_legend += [f'Harmonic Mean (AUC {hm_auc:.3f})', f'Max (AUC {max_auc:.3f})', f'Arithmetic Mean (AUC {mean_auc:.3f})', 'random']
+        pr_legend += [f'Harmonic Mean', f'Max', f'Arithmetic Mean']
 
+    roc_axes.legend(roc_legend, loc='lower right')
+    pr_axes.legend(pr_legend, loc='upper right')
     
     roc_fig.show()
     

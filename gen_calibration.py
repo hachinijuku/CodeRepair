@@ -17,6 +17,46 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import roc_curve, roc_auc_score
 
+def read_predictions(filenames, truth_dict):
+    # truth_dict:
+    #  Dictionary mapping predictions idx values to 1 (target) or 0 (benign)
+    #
+    # file:
+    # A file of predictions from a model on its test set
+    # File or tab-separated triples (idx, decision, decision_statistic
+    #  where idx is the object index from the truth file
+    #  decision is the label at threshold 0.5 (0 or 1)
+    #  decision_statistic is the model output value in range [0,1]
+    #
+    # returns idxs, decisions, num_targets, num_nontargets
+    # idxs is the list of target indexes
+    # decisions is the list of decision statistics corresponding to the idxs in order
+    num_targets = 0
+    num_nontargets = 0
+    decisions = []
+    idxs = []
+    for filename in filenames:
+        try:
+            fd = open(filename,'r')
+        except:
+            print(f'Unable to open predictions file {filename}')
+        data = fd.readlines()
+        fd.close()
+            
+        for datum in data:
+            tuple = datum.split('\t')
+            idx = int(tuple[0])
+            #assert not idx in decisions, \
+            #    f'duplicate ids in {file}: {idx}'
+            if truth_dict[idx]:
+                num_targets += 1
+            else:
+                num_nontargets += 1
+            idxs.append(idx)
+            decisions.append(float(tuple[2]))
+                    
+    return idxs, decisions, num_targets, num_nontargets
+
 class CalibratedResults:
 
     def __init__(self, truth_dict, test_decisions_file, validation_decisions_file):
@@ -39,10 +79,9 @@ class CalibratedResults:
 
         # Read both test and validation set decisions
         self.test_idxs, self.test_decisions, self.test_num_targets, self.test_num_nontargets = \
-            self.__read_decisions(truth_dict, self.test_decisions_file)
+            read_predictions([self.test_decisions_file], truth_dict)
         self.validation_idxs, self.validation_decisions, self.validation_num_targets, self.validation_num_nontargets= \
-            self.__read_decisions(truth_dict, self.validation_decisions_file)
-
+            read_predictions([self.validation_decisions_file], truth_dict)
             
         # Get ROCs for both test set decisions and validation set decisions
         self.test_fpr, self.test_tpr, self.test_thresholds = \
@@ -87,49 +126,7 @@ class CalibratedResults:
             roc_curve(list(map(lambda x:truth_dict[x],
                                list(self.test_idxs))),
                       list(self.test_precision_decisions))
-        
 
-    def __read_decisions(self, truth_dict, file):
-        # truth_dict:
-        #  Dictionary mapping predictions idx values to 1 (target) or 0 (benign)
-        #
-        # file:
-        # A file of predictions from a model on its test set
-        # File or tab-separated triples (idx, decision, decision_statistic
-        #  where idx is the object index from the truth file
-        #  decision is the label at threshold 0.5 (0 or 1)
-        #  decision_statistic is the model output value in range [0,1]
-        #
-        # returns idxs, decisions, num_targets, num_nontargets
-        # idxs is the list of target indexes
-        # decisions is the list of decision statistics corresponding to the idxs in order
-        # num_targets is the number of target objects as given by the truth_dict
-        
-        try:
-            fd = open(file,'r')
-        except:
-            print(f'Unable to open predictions file {file}')
-            fd.close()
-        data = fd.readlines()
-        fd.close()
-
-        num_targets = 0
-        num_nontargets = 0
-        idxs = []
-        decisions = []
-        for datum in data:
-            tuple = datum.split('\t')
-            idx = int(tuple[0])
-            #assert not idx in decisions, \
-            #    f'duplicate ids in {file}: {idx}'
-            if truth_dict[idx]:
-                num_targets += 1
-            else:
-                num_nontargets += 1
-            idxs.append(idx)
-            decisions.append(float(tuple[2]))
-
-        return idxs, decisions, num_targets, num_nontargets
 
 def brier_score(predictions, probabilities):
     assert len(predictions) == len(probabilities), \
@@ -161,13 +158,13 @@ def grab_truth(truth_files):
     return truth
 
 def start_plot(title, xlabel, ylabel):
-    this_fig, this_axes = plt.subplots()
+    this_fig, this_axes = plt.subplots(figsize=(6,6))
     this_axes.set_title(title)
     this_axes.set_xlabel(xlabel)
     this_axes.set_ylabel(ylabel)
     this_axes.grid(visible=True)
-    this_axes.set_xticks(np.arange(0, 1, 0.1))
-    this_axes.set_yticks(np.arange(0, 1, 0.1))
+    this_axes.set_xticks(np.arange(0, 1.1, 0.1))
+    this_axes.set_yticks(np.arange(0, 1.1, 0.1))
     return this_fig, this_axes
 
 def monotone_nondecreasing_hull(f):
@@ -295,7 +292,7 @@ def main():
 
             #calculate brier score
             print('Brier Scores')
-            print(f' raw predictions: {brier_score(calibrations[-1:][0].test_thresholds[1:], test_precisions)}')
+            print(f' raw predictions: {brier_score(calibrations[-1:][0].test_thresholds[1:], test_precisions):.4f}')
                                                   
                         
             calibration_graph_axes.plot(calibrations[-1:][0].test_thresholds[1:],
@@ -312,7 +309,8 @@ def main():
                                            (tprate*calibrations[-1:][0].test_num_targets\
                                             + fprate*calibrations[-1:][0].test_num_nontargets))
 
-            print(f' cal predictions: {brier_score(calibrations[-1:][0].calibrated_thresholds[1:], cal_test_precisions)}')
+            print(f' cal predictions: {brier_score(calibrations[-1:][0].calibrated_thresholds[1:], cal_test_precisions):.4f}')
+            
             calibration_graph_axes.plot(calibrations[-1:][0].calibrated_thresholds[1:],
                                         cal_test_precisions,
                                         color=plt_colors[1])
@@ -364,7 +362,38 @@ def main():
                                 combined_cal_fpr,
                                 combined_num_targets)
     
-    f1_fpr_axes.plot(combined_cal_fpr, combined_cal_f1_scores)
+    f1_fpr_axes.plot(combined_cal_fpr,
+                     combined_cal_f1_scores,
+                     label='_nolegend_')
+    # Find points where F1 is closest to 0.8
+    for f1_ind in range(0,len(combined_cal_f1_scores)):
+        if combined_cal_f1_scores[f1_ind] >= 0.8:
+            if combined_cal_f1_scores[f1_ind] - 0.8 \
+               < 0.8 - combined_cal_f1_scores[f1_ind -1]:
+                left_f1_ind = f1_ind
+            else:
+                left_f1_ind = f1_ind - 1
+            break
+    for f1_ind in range(len(combined_cal_f1_scores)-1,0,-1):
+        if combined_cal_f1_scores[f1_ind] >= 0.8:
+            if combined_cal_f1_scores[f1_ind] -0.8 \
+               < 0.8 - combined_cal_f1_scores[f1_ind + 1]:
+                right_f1_ind = f1_ind
+            else:
+                right_f1_ind = f1_ind + 1
+            break
+    f1_fpr_axes.scatter(combined_cal_fpr[left_f1_ind],
+                        0.8,
+                        color='orange',
+                        marker='x')
+    f1_fpr_axes.scatter(combined_cal_fpr[right_f1_ind],
+                        0.8,
+                        color='green',
+                        marker='x',
+                        )
+
+    f1_fpr_axes.legend([f'FPR {combined_cal_fpr[left_f1_ind]:.3f}',
+                        f'FPR {combined_cal_fpr[right_f1_ind]:.3f}'])
     f1_fpr_fig.show()
 
     multi_f1_threshold_axes.legend(legend_text, loc='lower left')
